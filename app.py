@@ -7,23 +7,39 @@ import streamlit as st
 import torch
 from PIL import Image
 from diffusers import AutoPipelineForText2Image
+from huggingface_hub import login
 
-# Try to import FluxPipeline (required for FLUX models on newer diffusers)
+# Try to import FluxPipeline (needed for FLUX models)
 try:
     from diffusers import FluxPipeline  # type: ignore
     HAS_FLUX = True
 except Exception:
     HAS_FLUX = False
 
-# ---------- Config ----------
-st.set_page_config(page_title="Fast Open Text-to-Image", page_icon="⚡", layout="wide")
+# ---------- Streamlit page config ----------
+st.set_page_config(page_title="piczie", page_icon="⚡", layout="wide")
 
+# ---------- Read HF token (Streamlit secrets → env fallback) ----------
+HF_TOKEN = None
+try:
+    HF_TOKEN = st.secrets.get("HUGGINGFACE_TOKEN", None)  # Streamlit Cloud
+except Exception:
+    pass
+HF_TOKEN = HF_TOKEN or os.environ.get("HUGGINGFACE_TOKEN")
+
+if HF_TOKEN:
+    # One-time login so gated models can be pulled
+    try:
+        login(token=HF_TOKEN)
+    except Exception as e:
+        st.warning(f"Hugging Face login failed: {e}")
+
+# ---------- Models ----------
 MODEL_CHOICES = [
-    "black-forest-labs/FLUX.1-schnell",  # fastest
-    "black-forest-labs/FLUX.1-dev",      # higher quality
-    "stabilityai/sd-turbo",              # very fast baseline
+    "black-forest-labs/FLUX.1-schnell",  # fastest (gated)
+    "black-forest-labs/FLUX.1-dev",      # higher quality (may be gated)
+    "stabilityai/sd-turbo",              # very fast baseline (open)
 ]
-
 DEFAULT_MODEL = "black-forest-labs/FLUX.1-schnell"
 
 # ---------- Helpers ----------
@@ -32,8 +48,18 @@ def device_and_dtype():
         return "cuda", (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16)
     return "cpu", torch.float32
 
+def require_token_if_gated(model_id: str):
+    """If the selected model is gated, ensure we have a token available."""
+    gated = "black-forest-labs/FLUX" in model_id
+    if gated and not HF_TOKEN:
+        raise RuntimeError(
+            "This model is gated on Hugging Face. Add HUGGINGFACE_TOKEN to Streamlit Secrets "
+            "or set it as an environment variable."
+        )
+
 @lru_cache(maxsize=3)
 def load_pipeline(model_id: str):
+    require_token_if_gated(model_id)
     device, dtype = device_and_dtype()
 
     if "black-forest-labs/FLUX" in model_id:
@@ -80,8 +106,8 @@ def to_bytes(img: Image.Image, fmt="PNG"):
     return buf
 
 # ---------- UI ----------
-st.markdown("# ⚡ Fast Open Text-to-Image")
-st.caption("FLUX (schnell/dev) and SD-Turbo via 🤗 diffusers. Free to run locally.")
+st.markdown("#Your own piczie ~")
+st.caption("FLUX (schnell/dev) and SD-Turbo via 🤗 diffusers. Uses your HF token for gated models.")
 
 with st.sidebar:
     st.subheader("Settings")
@@ -162,5 +188,7 @@ if gen_btn:
 
 # ---------- Footer ----------
 dev, dtype = device_and_dtype()
+hf_status = "token loaded" if HF_TOKEN else "no token (FLUX may fail)"
 st.sidebar.caption(f"Device: **{dev.upper()}**, DType: **{str(dtype).split('.')[-1]}**")
+st.sidebar.caption(f"Hugging Face: {hf_status}")
 st.sidebar.caption("Tip: For CPU, try 512×512 and fewer steps.")
