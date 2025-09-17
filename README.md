@@ -2,6 +2,7 @@
 
 Piczie is a Streamlit-based application for generating images from text prompts using open diffusion models such as **Stable Diffusion Turbo** and **FLUX.1**.  
 It provides a simple web interface while handling model loading, memory optimizations, and gated-model authentication with Hugging Face.
+[Piczel](https://piczel.streamlit.app)
 
 ---
 
